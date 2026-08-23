@@ -1,0 +1,35 @@
+[package]
+name = "rpn2"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.81"
+license = "MIT"
+description = "Ground-up rewrite of pratt-rpn: iterative, SIMD-assisted math-expression-to-binary-RPN compiler with a bit-exact fast float path."
+keywords = ["parser", "rpn", "bytecode", "simd", "no-std"]
+categories = ["no-std", "parsing"]
+
+[lib]
+name = "rpn2"
+path = "src/lib.rs"
+
+# The library is no_std; only the CLI binary needs std. Gate it so embedded
+# cross-builds skip it entirely.
+[features]
+std = []
+
+[[bin]]
+name = "rpn2"
+path = "src/bin/rpn2.rs"
+required-features = ["std"]
+
+[dev-dependencies]
+pratt-rpn = { path = "../pratt-rpn" }
+
+
+[[example]]
+name = "bench"
+required-features = ["std"]
+
+[[example]]
+name = "decomp"
+required-features = ["std"]
