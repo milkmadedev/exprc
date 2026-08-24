@@ -1,0 +1,36 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+    steps:
+      # Sibling layout mirrors local development; differential tests
+      # reference ../pratt-rpn.
+      - uses: actions/checkout@v4
+        with:
+          path: rpn2
+      - uses: actions/checkout@v4
+        with:
+          repository: milkmadedev/pratt-rpn
+          path: pratt-rpn
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: thumbv6m-none-eabi
+          components: clippy, rustfmt
+      - working-directory: rpn2
+        run: cargo fmt --check
+      - working-directory: rpn2
+        run: cargo clippy --all-targets -- -D warnings
+      - working-directory: rpn2
+        run: cargo test
+      - working-directory: rpn2
+        run: cargo test --features std
+      - working-directory: rpn2
+        run: cargo build --target thumbv6m-none-eabi --release
