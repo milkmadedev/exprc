@@ -1,14 +1,11 @@
-//! (module docs continue at lib)
-#![allow(unsafe_code)]
-//! The v2 engine: a fully *iterative* precedence-driven emitter.
+//! The engine: a fully *iterative* precedence-driven emitter.
 //!
-//! Where v1 (Pratt / precedence climbing) used the call stack as its
-//! operator stack — costing a frame per nesting level and capping out at
-//! ~19 KB of stack for legal-but-deep input — v2 keeps an explicit,
-//! fixed-size operator stack of 2-byte entries and emits instructions in
-//! the exact same single pass, with **no recursion anywhere**.
+//! No recursion anywhere; an explicit operator stack lives in
+//! caller-provided scratch memory, sized by [`Config::max_depth`]. A
+//! `Resolver` may be injected so that variable atoms can expand into
+//! previously compiled bodies (substitution) — see [`crate::Session`].
 //!
-//! # Correspondence with v1's binding powers
+//! # Binding powers
 //!
 //! | construct        | l_bp | r_bp | notes                           |
 //! |------------------|------|------|---------------------------------|
@@ -17,19 +14,13 @@
 //! | unary `-`        | —    | 25   | prefix                          |
 //! | `^`              | 30   | 30   | right-assoc                     |
 //! | `_base` postfix  | 41   | 41   | right-assoc; only after `log()` |
-//!
-//! Nesting accounting mirrors v1's recursion depth exactly (enforced by
-//! boundary-sweep tests against the v1 crate): parens, function calls,
-//! unary minus, `^` chains, and `_base` each contribute one level; flat
-//! left-assoc chains contribute none.
 
-use core::mem::MaybeUninit;
-
+use crate::config::Config;
 use crate::error::{Error, Result};
+use crate::fold;
 use crate::lex::{Scanner, Tok};
 use crate::opcodes;
 use crate::writer::Writer;
-use crate::MAX_DEPTH;
 
 // Binding powers (see module docs).
 const BP_ADD: (u8, u8) = (10, 11);
@@ -42,6 +33,24 @@ const BP_BASE: u8 = 41;
 // sentinel/frame entries use reserved high tags.
 const TAG_LPAREN: u8 = 0xE0;
 const TAG_LOGB: u8 = 0xE1;
+
+/// Variable-body lookup used for substitution. Implemented by
+/// [`crate::Session`]; the stateless entry points use [`NoResolve`].
+/// Implement this to supply your own definition store.
+pub trait Resolve {
+    /// Compiled bytecode body of `var`, if one has been defined.
+    fn body(&self, var: u8) -> Option<&[u8]>;
+}
+
+/// Null resolver: every variable stays a `VAR` opcode.
+pub struct NoResolve;
+
+impl Resolve for NoResolve {
+    #[inline]
+    fn body(&self, _var: u8) -> Option<&[u8]> {
+        None
+    }
+}
 
 #[derive(Clone, Copy)]
 struct Ent {
@@ -70,21 +79,21 @@ impl Ent {
     }
 }
 
-/// Fixed operator stack: bounded by structural nesting (`MAX_DEPTH`),
-/// never by expression length. Worst legal case holds ≤4 entries per
-/// nesting level (`(`, unary `-`, function frame, `_base`) ⇒
-/// `4 × MAX_DEPTH + slack`.
-const STACK_CAP: usize = 4 * 128 + 16;
-
-struct Engine<'b> {
+struct Engine<'b, 'r, R: Resolve> {
     w: Writer<'b>,
-    /// Operator stack. Only slots `0..sp` are ever read; construction
-    /// therefore skips initialization (a ~1 KB memset per parse that
-    /// showed up prominently in benchmarks). See `push`/`pop_emit` for
-    /// the discipline that makes this sound.
-    stack: [MaybeUninit<Ent>; STACK_CAP],
+    /// Operator stack in caller scratch: `sp` entries of two bytes each
+    /// (tag, aux). Only slots below `sp` are read.
+    stack: &'r mut [u8],
     sp: usize,
     nest: u32,
+    max_depth: u32,
+    /// Bit per letter while its definition is being expanded; guards
+    /// recursive definitions.
+    chain: u32,
+    resolver: &'r R,
+    /// When false (definition bodies), variables stay `VAR` opcodes so
+    /// storage stays lazy; consumer compilations pass true.
+    substitute: bool,
     /// Set immediately after a complete `log(...)` call closes; cleared by
     /// every other event. Gates the `_base` postfix.
     log_pending: bool,
@@ -92,21 +101,55 @@ struct Engine<'b> {
     eof_pos: usize,
 }
 
-impl<'b> Engine<'b> {
-    fn new(w: Writer<'b>, eof_pos: usize) -> Self {
-        // SAFETY: no element is read before being written by `push`;
-        // all reads are strictly below `sp`.
-        let stack = [const { MaybeUninit::uninit() }; STACK_CAP];
+impl<'b, 'r, R: Resolve> Engine<'b, 'r, R> {
+    fn new(
+        w: Writer<'b>,
+        stack: &'r mut [u8],
+        resolver: &'r R,
+        cfg: &Config,
+        substitute: bool,
+        eof_pos: usize,
+    ) -> Self {
         Self {
             w,
             stack,
             sp: 0,
-            // Parity with v1: the base expression occupies one depth unit.
+            // Parity with the historical engine: the base expression
+            // occupies one depth unit.
             nest: 1,
+            max_depth: cfg.get_max_depth(),
+            chain: 0,
+            resolver,
+            substitute,
             log_pending: false,
             expect_operand: true,
             eof_pos,
         }
+    }
+
+    #[inline]
+    fn cap_entries(&self) -> usize {
+        self.stack.len() / 2
+    }
+
+    #[inline]
+    fn peek(&self) -> Option<Ent> {
+        if self.sp == 0 {
+            return None;
+        }
+        let i = (self.sp - 1) * 2;
+        Some(Ent {
+            tag: self.stack[i],
+            aux: self.stack[i + 1],
+        })
+    }
+
+    #[inline]
+    fn place(&mut self, ent: Ent) {
+        let i = self.sp * 2;
+        self.stack[i] = ent.tag;
+        self.stack[i + 1] = ent.aux;
+        self.sp += 1;
     }
 
     #[inline]
@@ -116,24 +159,35 @@ impl<'b> Engine<'b> {
             TAG_LPAREN | TAG_LOGB | opcodes::POW | opcodes::NEG | opcodes::FUNC
         );
         if nested {
-            if self.nest >= MAX_DEPTH {
+            if self.nest >= self.max_depth {
                 return Err(Error::TooDeep);
             }
             self.nest += 1;
         }
         self.log_pending = false;
-        self.stack[self.sp] = MaybeUninit::new(ent);
-        self.sp += 1;
+        if self.sp >= self.cap_entries() {
+            return Err(Error::ScratchTooSmall {
+                needed: self.cap_entries() * 2 + 2,
+                got: self.stack.len(),
+            });
+        }
+        self.place(ent);
         Ok(())
     }
 
     /// Parenthesis sentinel that belongs to a function frame. It shares
     /// the frame's single nesting level, so it must not bump `nest`.
     #[inline]
-    fn push_frame_sentinel(&mut self) {
+    fn push_frame_sentinel(&mut self) -> Result<()> {
         self.log_pending = false;
-        self.stack[self.sp] = MaybeUninit::new(Ent::LPAREN);
-        self.sp += 1;
+        if self.sp >= self.cap_entries() {
+            return Err(Error::ScratchTooSmall {
+                needed: self.cap_entries() * 2 + 2,
+                got: self.stack.len(),
+            });
+        }
+        self.place(Ent::LPAREN);
+        Ok(())
     }
 
     /// Pop one entry and emit its instruction. Callers guarantee it is
@@ -141,9 +195,11 @@ impl<'b> Engine<'b> {
     #[inline]
     fn pop_emit(&mut self) -> Result<()> {
         self.sp -= 1;
-        // SAFETY: slot was written by push/push_frame_sentinel before this
-        // read (sp discipline).
-        let ent = unsafe { self.stack[self.sp].assume_init() };
+        let i = self.sp * 2;
+        let ent = Ent {
+            tag: self.stack[i],
+            aux: self.stack[i + 1],
+        };
         debug_assert!(!ent.is_barrier());
         self.log_pending = false;
         match ent.tag {
@@ -158,9 +214,7 @@ impl<'b> Engine<'b> {
     /// `lbp` (honoring associativity). Stops at barriers or drain.
     #[inline]
     fn collapse(&mut self, lbp: u8, left_assoc: bool) -> Result<()> {
-        while self.sp > 0 {
-            // SAFETY: peek strictly below sp (written earlier).
-            let top = unsafe { self.stack[self.sp - 1].assume_init() };
+        while let Some(top) = self.peek() {
             if top.is_barrier() {
                 break;
             }
@@ -186,14 +240,39 @@ impl<'b> Engine<'b> {
         self.infix(opcodes::MUL, BP_MUL, true)
     }
 
+    /// Emit a variable atom: substituted-and-folded when defined, a raw
+    /// `VAR` opcode otherwise.
+    #[inline]
+    fn emit_variable(&mut self, name: u8) -> Result<()> {
+        let resolved = if self.substitute {
+            self.resolver.body(name)
+        } else {
+            None
+        };
+        match resolved {
+            None => self.w.emitn([opcodes::VAR, name])?,
+            Some(body) => {
+                let bit = 1u32 << (name - b'a');
+                if self.chain & bit != 0 {
+                    return Err(Error::RecursiveDefinition { var: name });
+                }
+                self.chain |= bit;
+                fold::emit_var_body(body, self.resolver, &mut self.w, self.chain)?;
+                self.chain &= !bit;
+            }
+        }
+        self.log_pending = false;
+        self.expect_operand = false;
+        Ok(())
+    }
+
     fn finish(mut self) -> Result<usize> {
         if self.expect_operand {
             return Err(Error::UnexpectedToken { pos: self.eof_pos });
         }
         // Drain. A surviving barrier means an unclosed parenthesis.
         while self.sp > 0 {
-            // SAFETY: peek strictly below sp (written earlier).
-            if unsafe { self.stack[self.sp - 1].assume_init() }.is_barrier() {
+            if self.peek().is_some_and(|e| e.is_barrier()) {
                 return Err(Error::ExpectedRparen { pos: self.eof_pos });
             }
             self.pop_emit()?;
@@ -202,9 +281,46 @@ impl<'b> Engine<'b> {
     }
 }
 
-pub fn parse_into(src: &str, out: &mut [u8]) -> Result<usize> {
+/// Stateless compilation under an explicit [`Config`].
+///
+/// `stack` must be at least [`Config::scratch_len`] bytes; it is used as
+/// the operator stack and its contents are irrelevant on entry.
+pub fn compile_into<R: Resolve>(
+    cfg: &Config,
+    resolver: &R,
+    src: &str,
+    out: &mut [u8],
+    stack: &mut [u8],
+) -> Result<usize> {
+    compile_into_ex(cfg, resolver, src, out, stack, true)
+}
+
+/// Like [`compile_into`] with explicit substitution control: definition
+/// bodies are compiled with `substitute = false` so they stay lazy.
+pub fn compile_into_ex<R: Resolve>(
+    cfg: &Config,
+    resolver: &R,
+    src: &str,
+    out: &mut [u8],
+    stack: &mut [u8],
+    substitute: bool,
+) -> Result<usize> {
+    let need = cfg.scratch_len();
+    if stack.len() < need {
+        return Err(Error::ScratchTooSmall {
+            needed: need,
+            got: stack.len(),
+        });
+    }
     let mut scanner = Scanner::new(src);
-    let mut eng = Engine::new(Writer::new(out), src.len());
+    let mut eng = Engine::new(
+        Writer::with_limit(out, cfg.get_output_limit()),
+        stack,
+        resolver,
+        cfg,
+        substitute,
+        src.len(),
+    );
 
     while let Some((pos, tok)) = scanner.next()? {
         // Fast path: operand following another operand splices an
@@ -229,26 +345,22 @@ pub fn parse_into(src: &str, out: &mut [u8]) -> Result<usize> {
                     }
                     eng.log_pending = false;
                     loop {
-                        if eng.sp == 0 {
-                            return Err(Error::UnexpectedToken { pos });
-                        }
-                        // SAFETY: peek strictly below sp (written earlier).
-                        if unsafe { eng.stack[eng.sp - 1].assume_init() }.tag == TAG_LPAREN {
+                        let top = eng.peek().ok_or(Error::UnexpectedToken { pos })?;
+                        if top.tag == TAG_LPAREN {
                             break;
                         }
                         eng.pop_emit()?;
                     }
                     eng.sp -= 1; // sentinel (shares its frame's nesting unit)
                                  // A function frame directly beneath closes its call.
-                                 // SAFETY: as above, peek below sp.
-                    if eng.sp > 0
-                        && unsafe { eng.stack[eng.sp - 1].assume_init() }.tag == opcodes::FUNC
-                    {
-                        let id = unsafe { eng.stack[eng.sp - 1].assume_init() }.aux;
-                        eng.sp -= 1;
-                        eng.nest -= 1;
-                        eng.w.emit(&[opcodes::FUNC, id])?;
-                        eng.log_pending = id == opcodes::FUNC_LOG;
+                    if let Some(f) = eng.peek() {
+                        if f.tag == opcodes::FUNC {
+                            let id = f.aux;
+                            eng.sp -= 1;
+                            eng.nest -= 1;
+                            eng.w.emitn([opcodes::FUNC, id])?;
+                            eng.log_pending = id == opcodes::FUNC_LOG;
+                        }
                     }
                     eng.expect_operand = false;
                 }
@@ -264,6 +376,11 @@ pub fn parse_into(src: &str, out: &mut [u8]) -> Result<usize> {
                     eng.expect_operand = true;
                 }
 
+                Tok::Mul | Tok::Div | Tok::Pow if eng.expect_operand => {
+                    // Binary-only operators cannot begin an expression.
+                    return Err(Error::UnexpectedToken { pos });
+                }
+
                 Tok::Add => {
                     eng.infix(opcodes::ADD, BP_ADD, true)?;
                     eng.expect_operand = true;
@@ -272,11 +389,6 @@ pub fn parse_into(src: &str, out: &mut [u8]) -> Result<usize> {
                     eng.infix(opcodes::SUB, BP_ADD, true)?;
                     eng.expect_operand = true;
                 }
-                Tok::Mul | Tok::Div | Tok::Pow if eng.expect_operand => {
-                    // Binary-only operators cannot begin an expression.
-                    return Err(Error::UnexpectedToken { pos });
-                }
-
                 Tok::Mul => {
                     eng.infix(opcodes::MUL, BP_MUL, true)?;
                     eng.expect_operand = true;
@@ -306,11 +418,7 @@ pub fn parse_into(src: &str, out: &mut [u8]) -> Result<usize> {
                 eng.log_pending = false;
                 eng.expect_operand = false;
             }
-            Tok::Var(name) => {
-                eng.w.emitn([opcodes::VAR, name])?;
-                eng.log_pending = false;
-                eng.expect_operand = false;
-            }
+            Tok::Var(name) => eng.emit_variable(name)?,
             Tok::Const(id) => {
                 eng.w.emitn([opcodes::CONST, id])?;
                 eng.log_pending = false;
@@ -319,7 +427,7 @@ pub fn parse_into(src: &str, out: &mut [u8]) -> Result<usize> {
             Tok::Func(id) => {
                 // Happy path: `(` directly follows. Slow path: fully lex
                 // the offending token so lexer errors surface before
-                // grammar errors, matching v1's token-stream semantics.
+                // grammar errors.
                 match scanner.skip_peek() {
                     Some(b'(') => scanner.bump(),
                     _ => {
@@ -333,7 +441,7 @@ pub fn parse_into(src: &str, out: &mut [u8]) -> Result<usize> {
                     tag: opcodes::FUNC,
                     aux: id,
                 })?;
-                eng.push_frame_sentinel();
+                eng.push_frame_sentinel()?;
                 eng.expect_operand = true;
             }
             Tok::LParen => {
@@ -345,4 +453,11 @@ pub fn parse_into(src: &str, out: &mut [u8]) -> Result<usize> {
     }
 
     eng.finish()
+}
+
+/// Convenience wrapper with the default [`Config`], no variables, and an
+/// inline operator stack sized for [`crate::DEFAULT_MAX_DEPTH`].
+pub fn parse_into(src: &str, out: &mut [u8]) -> Result<usize> {
+    let mut stack = [0u8; crate::DEFAULT_MAX_DEPTH as usize * 4 + 32];
+    compile_into(&Config::new(), &NoResolve, src, out, &mut stack)
 }

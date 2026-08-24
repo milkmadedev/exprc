@@ -102,6 +102,69 @@ rpn   : 100 log 10 logb
 bytes : 22/10240
 ```
 
+## Configurable limits — the programmer owns the numbers
+
+No output size or nesting depth is baked in. A `Config` states your
+budget; scratch requirements derive from it:
+
+```rust
+use rpn2::{compile_into, Config, NoResolve};
+
+let cfg = Config::new().output_limit(1024 * 1024).max_depth(2048);
+let mut out = vec![0u8; cfg.get_output_limit()];
+let mut stack = vec![0u8; cfg.scratch_len()];
+let n = compile_into(&cfg, &NoResolve, "1+1", &mut out, &mut stack)?;
+```
+
+* `output_limit(n)` — 2 KiB for a widget, 1 MiB for a CAS scratchpad.
+  Exceeding *your* number is `OutputLimitExceeded`; a buffer smaller
+  than your budget that an expression outgrows is `BufferTooSmall`.
+* `max_depth(d)` — each unit costs 4 bytes of scratch
+  (`Config::scratch_len()`); deep nesting on demand.
+* The stateless `parse_into` keeps the old default posture
+  (10 KiB / depth 128) with zero ceremony.
+
+## Variables: substitution, tweaking, solving
+
+`Session` stores single-letter definitions and splices them into later
+compilations. Storage is **lazy** (bodies keep their `VAR` opcodes), so
+redefining any letter changes everything downstream on the next compile:
+
+```rust
+use rpn2::{decode_into, Config, Session};
+let mut s = Session::<256>::new(Config::new());
+let mut stack = [0u8; Config::new().scratch_len()];
+
+s.compile_line("a = 6", &mut [], &mut stack)?;
+s.compile_line("b = 7", &mut [], &mut stack)?;
+s.compile_line("x = a*b", &mut [], &mut stack)?;
+
+let mut out = [0u8; 128];
+let n = s.compile("x+1", &mut out, &mut stack)?;
+// decode -> "42 1 +": fully-known chains SOLVE to literals at compile time.
+```
+
+* Recursive definitions (`x = x+1`, mutual cycles) are rejected with
+  `RecursiveDefinition` and never clobber existing definitions.
+* Transcendental functions stay symbolic (the crate carries no libm).
+* `Session::compile_line` parses calculator-style input, returning
+  `Line::Defined` / `Line::Expression`.
+
+## Evaluation
+
+```rust
+use rpn2::{eval, parse_into, Vars};
+let mut buf = [0u8; 256];
+let n = parse_into("2x^2+1", &mut buf)?;
+let mut vars = Vars::zeroed();
+vars.set(b'x', 3.0);
+assert_eq!(eval(&buf[..n], &vars, &mut [0.0; 64])?, 19.0);
+```
+
+Postfix stack machine over caller memory; unset variables read `NaN`.
+Arithmetic evaluates everywhere; transcendentals need the `std`
+feature (no bundled libm — wrong numbers are worse than loud errors).
+
 ## License
 
 MIT
