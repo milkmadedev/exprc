@@ -7,19 +7,21 @@
 //!   into a `u64`; the single `u64 → f64` conversion *is* the correctly
 //!   rounded value of that decimal integer, so it is bit-identical to
 //!   `str::parse`.
-//! * **Everything else** with mantissa magnitude `m < 10^15` (hence
-//!   exactly representable, since `10^15 < 2^53`) and decimal shift
-//!   `k ∈ [-22, 22]`: the true value equals `m × 10^k`. For `k ≥ 0` we
-//!   multiply by the *exact* float `10^k`; for `k < 0` we divide by the
-//!   exact float `10^|k|` (negative powers are not themselves
-//!   representable). IEEE mul/div is correctly rounded w.r.t. its
-//!   operands' exact result, so one operation yields precisely the
-//!   correctly rounded conversion of the original literal — bit-identical
-//!   to `str::parse`.
+//! * **Everything else** with integer mantissa `m ≤ 2^53 − 1` (the
+//!   largest value an f64 represents exactly) and decimal shift
+//!   `k ∈ [-22, 22]`: the true value equals `m × 10^k`. For `k ≥ 0`
+//!   this computes `m * 10^k`; for `k < 0`, `m / 10^|k|`. Positive
+//!   powers up to `10^22` are exactly representable; negative powers
+//!   are not, which is why the negative branch divides rather than
+//!   multiplying by a stored reciprocal. IEEE multiply/divide is
+//!   correctly rounded with respect to its operands' exact result, so
+//!   one operation yields the correctly rounded conversion of the
+//!   original literal — bit-identical to `str::parse`.
 //!
-//! Anything outside those envelopes returns `None`; the caller falls back
-//! to core's parser. Differential tests against `str::parse` enforce the
-//! bit-exactness claim on edge grids and randomized fuzzing.
+//! Literals outside these envelopes return `None` from [`try_fast`] and
+//! take [`fallback`] instead. A differential test pins the fast path to
+//! `str::parse` across boundary shapes (2^53 ± 1, 15..20-digit
+//! mantissas, exponent edges).
 
 /// `10^k` for `0 <= k <= 22` — every entry exactly representable in f64.
 /// Negative powers are *not* exactly representable, so they never appear

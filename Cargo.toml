@@ -7,6 +7,7 @@ license = "MIT"
 description = "Compiles math expressions (&str) into compact binary RPN bytecode. Zero-alloc, no_std, iterative, SIMD-assisted; built for live per-keystroke recompilation."
 keywords = ["parser", "rpn", "bytecode", "expression", "no-std"]
 readme = "README.md"
+repository = "https://github.com/milkmadedev/rpn2"
 categories = ["no-std", "parsing"]
 
 [lib]

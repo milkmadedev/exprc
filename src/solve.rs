@@ -1,15 +1,19 @@
-//! Numeric equation solving: `lhs = rhs`, find `var`.
+//! Numeric equation solving.
 //!
-//! The honest kind of solver — the one every physical calculator ships.
-//! Given compiled bytecodes for both sides, sample the difference over
-//! a range, bracket every sign change, and bisect to machine precision.
-//! Exact closed-form algebra (a CAS) is explicitly out of scope; what
-//! you get are the *numbers* a calculator would give you.
+//! Finds values of one variable where two compiled expressions agree:
+//! sample the difference over a range, bracket each sign change, and
+//! bisect until the interval collapses to a single `f64`.
 //!
-//! Works on continuous functions over the chosen range — polynomials,
-//! anything built from `+ - * / ^ neg` — including expressions using
-//! [`crate::Session`] substitutions, since those fold into plain
-//! bytecode before reaching here.
+//! This is bracketing, not symbolic algebra. Consequences:
+//!
+//! * Works on continuous functions over the chosen range.
+//! * Roots of even multiplicity (e.g. the `0` of `(x-1)^2`) never cross
+//!   zero, produce no sign change, and are not reported.
+//! * Root count found is bounded by sampling density; increase
+//!   [`SolveCfg::steps`] for oscillatory functions.
+//!
+//! Session-defined variables fold before reaching this module, so
+//! definitions participate fully in both sides of the equation.
 
 use crate::error::{Error, Result};
 use crate::eval::{eval, Vars};

@@ -5,11 +5,10 @@
 //! 1. **Acyclicity walk** — follow every defined-variable reference and
 //!    reject any cycle (`x = y`, `y = x`) before any emission happens.
 //! 2. **Fold attempt** — interpret the postfix stream abstractly. If
-//!    every leaf resolves to a number (literals, `e`/`pi`, previously
-//!    folded definitions, computable operators), the whole definition
-//!    collapses to a single `NUM` instruction: this is the "we know
-//!    `a b c`, so solve `x`" behavior. Transcendental functions never
-//!    fold (the crate carries no libm), they stay symbolic.
+//!    every leaf resolves to a number (literals, `e`/`pi`, definitions
+//!    that folded earlier, computable operators), the whole definition
+//!    collapses to a single `NUM` instruction. Transcendental functions
+//!    do not fold — the crate carries no libm — and remain symbolic.
 //!
 //! When folding is impossible the body's instructions are copied
 //! through verbatim, recursing into nested defined variables.

@@ -1,11 +1,8 @@
-//! # rpn2 — math expressions to binary RPN bytecode
+//! # rpn2
 //!
-//! Compile mathematical expressions (as `&str`) into compact binary
-//! Reverse-Polish-Notation bytecode, written into buffers **you** own,
-//! under limits **you** choose. Built for live recompilation: zero
-//! allocation, no panics, bounded everything.
-//!
-//! ## One-shot compilation
+//! Compiles mathematical expressions into compact binary RPN bytecode.
+//! `no_std`, zero allocation, no panics; all memory is caller-provided
+//! and every limit is programmer-configured.
 //!
 //! ```
 //! use rpn2::{decode_into, parse_into, MAX_RPN};
@@ -19,103 +16,34 @@
 //! assert_eq!(&text[..m], b"3 x * 2 +");
 //! ```
 //!
-//! ## Programmer-owned limits
+//! # Organization
 //!
-//! [`Config`] replaces every hard-coded bound: the output budget and
-//! nesting depth are yours. Scratch requirements derive from them.
+//! * [`parse_into`] / [`compile_into`] — expression to bytecode. The
+//!   latter takes a [`Config`] (output limit, nesting depth) and a
+//!   [`Resolve`] implementation for variable substitution.
+//! * [`Session`] — persistent single-letter variables: definition,
+//!   substitution, constant folding, calculator-style lines.
+//! * [`eval`] — postfix stack machine over caller memory with a
+//!   [`Vars`] value map.
+//! * [`solve`] — numeric equation solving by bracketed bisection.
+//! * [`decode_into`] — renders bytecode back to readable RPN text.
+//! * [`opcodes`] — the wire format.
 //!
-//! ```
-//! # use rpn2::{compile_into, Config, NoResolve};
-//! # fn main() -> Result<(), rpn2::Error> {
-//! // 1 MiB of bytecode budget, deep nesting:
-//! let cfg = Config::new().output_limit(1024 * 1024).max_depth(2048);
-//! let mut out = vec![0u8; cfg.get_output_limit()];
-//! let mut stack = vec![0u8; cfg.scratch_len()];
-//! let n = compile_into(&cfg, &NoResolve, "1+1", &mut out, &mut stack)?;
-//! assert!(n > 0);
-//! # Ok(())
-//! # }
-//! ```
+//! # Input grammar
 //!
-//! [`NoResolve`] keeps every variable symbolic; pass your own
-//! `Resolve` implementation (or a [`Session`]) to substitute bodies.
+//! Numbers (`12`, `.5`, `1e-3`), variables `a..z`, constants `e`/`pi`,
+//! functions `sin cos tan asin acos atan ln log`, operators `+ - * / ^`,
+//! unary minus, implicit multiplication, and log-with-base via postfix
+//! underscore (`log(100)_10`). See the README for the full table and
+//! precedence rules.
 //!
-//! ## Variables, substitution, solving
+//! # Error handling
 //!
-//! [`Session`] stores single-letter definitions and splices them into
-//! later compilations; fully-numeric chains collapse to literals.
-//!
-//! ```
-//! use rpn2::{decode_into, Config, Session};
-//!
-//! let mut s = Session::<256>::new(Config::new());
-//! let mut stack = [0u8; Config::new().scratch_len()];
-//! s.compile_line("a = 6", &mut [], &mut stack).unwrap();
-//! s.compile_line("b = 7", &mut [], &mut stack).unwrap();
-//! s.compile_line("x = a*b", &mut [], &mut stack).unwrap();
-//!
-//! let mut out = [0u8; 128];
-//! let n = s.compile("x+1", &mut out, &mut stack).unwrap();
-//! let mut text = [0u8; 512];
-//! let m = decode_into(&out[..n], &mut text).unwrap();
-//! assert_eq!(&text[..m], b"42 1 +"); // solved at compile time
-//! ```
-//!
-//! ## Evaluation
-//!
-//! Pair compiled bytecode with a [`Vars`] map and a value stack:
-//!
-//! ```
-//! use rpn2::{eval, parse_into, Vars};
-//! # fn main() -> Result<(), rpn2::Error> {
-//! let mut buf = [0u8; 256];
-//! let n = parse_into("2x^2+1", &mut buf)?;
-//! let mut vars = Vars::zeroed();
-//! vars.set(b'x', 3.0);
-//! let y = eval(&buf[..n], &vars, &mut [0.0; 64])?;
-//! assert_eq!(y, 19.0);
-//! # Ok(())
-//! # }
-//! ```
-//!
-//! ## Equation solving (numeric)
-//!
-//! ```
-//! # fn main() -> Result<(), rpn2::Error> {
-//! use rpn2::{eval, parse_into, solve, Vars, SolveCfg};
-//! // y = 2x+3  and  y = 2x^3+10: where do they meet?
-//! let mut l = [0u8; 128]; let mut r = [0u8; 128];
-//! let ln = parse_into("2x+3", &mut l)?;
-//! let rn = parse_into("2x^3+10", &mut r)?;
-//! let mut roots = [0.0; 4];
-//! let k = solve(&l[..ln], &r[..rn], b'x', &Default::default(),
-//!               SolveCfg { range: (-10.0, 10.0), steps: 512 },
-//!               &mut [0.0; 64], &mut roots)?;
-//! assert!(k >= 1);
-//! // Verify by residual instead of hardcoding digits:
-//! # let x = roots[0];
-//! # let mut vars = rpn2::Vars::zeroed();
-//! # vars.set(b'x', x);
-//! # let mut st = [0.0; 64];
-//! assert!((eval(&l[..ln], &vars, &mut st)? - eval(&r[..rn], &vars, &mut st)?).abs() < 1e-9);
-//! # Ok(())
-//! # }
-//! ```
-//!
-//! Bracketing finds sign changes only — tangential (even-multiplicity)
-//! roots are invisible to it, the same as every handheld calculator.
-//!
-//! ## Contract
-//!
-//! * **Input**: ASCII expressions — numbers (`12`, `.5`, `1e-3`),
-//!   variables `a..z`, constants `e`/`pi`, functions
-//!   `sin cos tan asin acos atan ln log`, operators `+ - * / ^`,
-//!   unary minus, implicit multiplication (`3x`, `2sin(x)`), log-base
-//!   via postfix underscore (`log(100)_10`).
-//! * **Output**: little-endian opcode stream ([`opcodes`]), fixed-width
-//!   instructions, O(1) skip/decode.
-//! * **Failure is a value** ([`Error`]) with offsets; nothing panics;
-//!   nothing allocates on any compile or evaluate path.
+//! Every failure mode is a typed [`Error`] carrying a byte offset where
+//! relevant: malformed input, nesting beyond [`MAX_DEPTH`], output
+//! beyond the configured limit, undersized buffers or scratch,
+//! recursive definitions, evaluation stack exhaustion. No panics on any
+//! path.
 
 #![no_std]
 #![deny(unsafe_code)]

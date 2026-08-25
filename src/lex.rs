@@ -1,9 +1,15 @@
-//! Table- and SIMD-driven lexer.
+//! The lexer.
 //!
-//! One dispatch through the 256-entry class table per token; number and
-//! identifier spans are located by SIMD chunk scans (scalar on short
-//! tails / non-vector targets), so the per-byte `match` cascade and the
-//! bounds-checked `.get()` probing of v1 disappear.
+//! Produces tokens in a single left-to-right scan of the input. Token
+//! kind is decided by one lookup into the byte-class table; number and
+//! identifier spans are measured with hybrid scalar/SIMD scans (see
+//! [`crate::simd`]).
+//!
+//! Number literals follow the shapes accepted by [`crate::num`]:
+//! `[digits][.digits]([eE][+-]digits)?`. Identifiers are matched as
+//! whole words — reserved words name functions and constants, any other
+//! single letter is a variable, and multi-letter unknown words are an
+//! error rather than implicit multiplication.
 
 use crate::class::{class, Class};
 use crate::error::{Error, Result};

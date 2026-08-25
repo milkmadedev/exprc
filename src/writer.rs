@@ -1,9 +1,18 @@
-//! Output writer: one capacity check per *instruction*, not per byte.
+//! Output writer.
 //!
-//! v1 paid a bounds check for every single byte emitted (9 checks per
-//! f64 literal). Here [`Writer::emit`] reserves the whole instruction
-//! payload at once — a single comparison — then copies via
-//! `copy_from_slice`, which lowers to memcpy for the fixed-size cases.
+//! All emission funnels through two entry points that each perform a
+//! single capacity check covering the entire instruction payload:
+//!
+//! * [`Writer::emit`] — variable-length slices (decode formatting)
+//! * [`Writer::emitn`] — fixed-size instruction encodings; the const
+//!   length lets the copy lower to scalar stores instead of a call to
+//!   `memcpy`
+//!
+//! Capacity is `min(buffer_len, configured_limit)`. Overflowing it
+//! yields [`Error::BufferTooSmall`] when the buffer is smaller than the
+//! configured limit (retrying with a larger buffer can help) or
+//! [`Error::OutputLimitExceeded`] when the expression inherently exceeds
+//! the limit (retrying cannot help).
 
 use crate::error::{Error, Result};
 pub(crate) struct Writer<'b> {
