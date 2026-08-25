@@ -8,8 +8,8 @@
 //! 3. **Mutation fuzz** — single-byte mutations of valid expressions;
 //!    both engines must agree on Ok(bytes) or the exact Err.
 
-use pratt_rpn as v1;
 use exprc::{Error as E2, MAX_RPN};
+use pratt_rpn as v1;
 use std::string::String;
 use std::vec::Vec;
 
