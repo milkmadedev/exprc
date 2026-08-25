@@ -252,14 +252,13 @@ fn oversized_bodies_report_buffer_too_small() {
 
 #[test]
 fn eval_arithmetic_and_vars() {
+    // Arithmetic and integral-exponent powers evaluate on every target.
     let mut buf = [0u8; 256];
     let cases = [
         ("2x^2+1", 3.0, 19.0),
         ("-x^2", 3.0, -9.0),
         ("2^-2+0.5", 0.0, 0.75),
-        ("log(8)_2", 0.0, 3.0),
-        ("e-2", 0.0, std::f64::consts::E - 2.0),
-        ("atan(1)*4-pi", 0.0, 0.0),
+        ("x*0+x-x", 7.0, 0.0),
     ];
     for (src, xv, want) in cases {
         let n = exprc::parse_into(src, &mut buf).unwrap();
@@ -299,11 +298,28 @@ fn eval_stack_overflow_is_an_error() {
     assert!(matches!(r, Err(Error::EvalStackOverflow)));
 }
 
+#[cfg(feature = "std")]
 #[test]
-fn transcendental_eval_requires_std_feature_here_it_has_it() {
-    // Built with `std` in this test harness, so sin works:
+fn eval_transcendentals_with_std() {
     let mut buf = [0u8; 64];
     let n = exprc::parse_into("sin(0)", &mut buf).unwrap();
     let v = eval(&buf[..n], &Vars::new(), &mut [0.0; 8]).unwrap();
     assert_eq!(v, 0.0);
+}
+
+#[cfg(feature = "std")]
+#[test]
+fn eval_log_base_and_transcendentals() {
+    use exprc::{eval, parse_into, Vars};
+    let mut buf = [0u8; 256];
+    let cases = [
+        ("log(8)_2", 3.0),
+        ("e-2", core::f64::consts::E - 2.0),
+        ("atan(1)*4-pi", 0.0),
+    ];
+    for (src, want) in cases {
+        let n = parse_into(src, &mut buf).unwrap();
+        let got = eval(&buf[..n], &Vars::new(), &mut [0.0; 64]).unwrap();
+        assert!((got - want).abs() < 1e-12, "{src}: {got} vs {want}");
+    }
 }
