@@ -30,8 +30,7 @@ fn tiny_budget_rejects_with_buffer_too_small() {
         Err(Error::BufferTooSmall)
     );
     // Same budget, adequate buffer: compiles.
-    let out = vec![0u8; 128];
-    let mut out = vec![0u8; 128];
+    let mut out = [0u8; 128];
     assert!(compile_into(&cfg, &NoResolve, "1*2*3", &mut out, &mut stack).is_ok());
 }
 

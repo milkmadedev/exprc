@@ -165,6 +165,29 @@ Postfix stack machine over caller memory; unset variables read `NaN`.
 Arithmetic evaluates everywhere; transcendentals need the `std`
 feature (no bundled libm — wrong numbers are worse than loud errors).
 
+## Equation solving (numeric)
+
+```rust
+use rpn2::{parse_into, solve, SolveCfg, Vars};
+
+// y = 2x+3 meets y = 2x^3+10 — where?
+let mut l = [0u8; 128];
+let mut r = [0u8; 128];
+let ln = parse_into("2x+3", &mut l)?;
+let rn = parse_into("2x^3+10", &mut r)?;
+let mut roots = [0.0; 4];
+let k = solve(&l[..ln], &r[..rn], b'x', &Vars::new(),
+              SolveCfg { range: (-10.0, 10.0), steps: 512 },
+              &mut [0.0; 64], &mut roots)?;
+// k roots written, ascending; verify by residual, not by faith.
+```
+
+Bracketed sign-change search + bisection over the evaluator: the same
+contract as a handheld calculator's solver. Continuous functions only;
+tangential (even-multiplicity) roots don't change sign and stay
+invisible. Session substitutions participate — compile both sides via a
+`Session` and known variables fold before the search runs.
+
 ## License
 
 MIT

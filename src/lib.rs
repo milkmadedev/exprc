@@ -78,6 +78,33 @@
 //! # }
 //! ```
 //!
+//! ## Equation solving (numeric)
+//!
+//! ```
+//! # fn main() -> Result<(), rpn2::Error> {
+//! use rpn2::{eval, parse_into, solve, Vars, SolveCfg};
+//! // y = 2x+3  and  y = 2x^3+10: where do they meet?
+//! let mut l = [0u8; 128]; let mut r = [0u8; 128];
+//! let ln = parse_into("2x+3", &mut l)?;
+//! let rn = parse_into("2x^3+10", &mut r)?;
+//! let mut roots = [0.0; 4];
+//! let k = solve(&l[..ln], &r[..rn], b'x', &Default::default(),
+//!               SolveCfg { range: (-10.0, 10.0), steps: 512 },
+//!               &mut [0.0; 64], &mut roots)?;
+//! assert!(k >= 1);
+//! // Verify by residual instead of hardcoding digits:
+//! # let x = roots[0];
+//! # let mut vars = rpn2::Vars::zeroed();
+//! # vars.set(b'x', x);
+//! # let mut st = [0.0; 64];
+//! assert!((eval(&l[..ln], &vars, &mut st)? - eval(&r[..rn], &vars, &mut st)?).abs() < 1e-9);
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! Bracketing finds sign changes only — tangential (even-multiplicity)
+//! roots are invisible to it, the same as every handheld calculator.
+//!
 //! ## Contract
 //!
 //! * **Input**: ASCII expressions — numbers (`12`, `.5`, `1e-3`),
@@ -109,6 +136,7 @@ mod lex;
 mod num;
 mod session;
 mod simd;
+mod solve;
 mod writer;
 
 pub use config::{Config, DEFAULT_MAX_DEPTH, DEFAULT_OUTPUT_LIMIT};
@@ -117,6 +145,7 @@ pub use decode::decode_into;
 pub use error::{Error, Result};
 pub use eval::{eval, Vars};
 pub use session::{split_assignment, Line, Session};
+pub use solve::{solve, SolveCfg};
 
 /// Back-compat alias: the default configuration's output limit.
 pub const MAX_RPN: usize = DEFAULT_OUTPUT_LIMIT;
