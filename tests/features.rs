@@ -1,7 +1,7 @@
 //! Tests for programmer-owned limits, variable sessions (substitution,
 //! solving, cycles), and evaluation.
 
-use rpn2::{
+use exprc::{
     compile_into, decode_into, eval, split_assignment, Config, Error, NoResolve, Session, Vars,
 };
 
@@ -15,8 +15,8 @@ fn text(rpn: &[u8]) -> String {
 
 #[test]
 fn default_parse_unchanged() {
-    let mut buf = [0u8; rpn2::MAX_RPN];
-    let n = rpn2::parse_into("3x+2", &mut buf).unwrap();
+    let mut buf = [0u8; exprc::MAX_RPN];
+    let n = exprc::parse_into("3x+2", &mut buf).unwrap();
     assert_eq!(text(&buf[..n]), "3 x * 2 +");
 }
 
@@ -208,7 +208,7 @@ fn compile_line_handles_calculator_input() {
     let mut stack = vec![0u8; Config::new().scratch_len()];
     let mut out = [0u8; 256];
 
-    use rpn2::Line;
+    use exprc::Line;
     assert!(matches!(
         s.compile_line("m = 2n", &mut out, &mut stack),
         Ok(Line::Defined { var: b'm', .. })
@@ -262,7 +262,7 @@ fn eval_arithmetic_and_vars() {
         ("atan(1)*4-pi", 0.0, 0.0),
     ];
     for (src, xv, want) in cases {
-        let n = rpn2::parse_into(src, &mut buf).unwrap();
+        let n = exprc::parse_into(src, &mut buf).unwrap();
         let mut vars = Vars::zeroed();
         vars.set(b'x', xv);
         let got = eval(&buf[..n], &vars, &mut [0.0; 64]).unwrap();
@@ -273,7 +273,7 @@ fn eval_arithmetic_and_vars() {
 #[test]
 fn eval_unset_var_is_nan() {
     let mut buf = [0u8; 64];
-    let n = rpn2::parse_into("x+1", &mut buf).unwrap();
+    let n = exprc::parse_into("x+1", &mut buf).unwrap();
     let got = eval(&buf[..n], &Vars::new(), &mut [0.0; 8]).unwrap();
     assert!(got.is_nan());
 }
@@ -294,7 +294,7 @@ fn eval_session_solved_output_is_exact() {
 #[test]
 fn eval_stack_overflow_is_an_error() {
     let mut buf = [0u8; 64];
-    let n = rpn2::parse_into("1+2", &mut buf).unwrap();
+    let n = exprc::parse_into("1+2", &mut buf).unwrap();
     let r = eval(&buf[..n], &Vars::zeroed(), &mut []);
     assert!(matches!(r, Err(Error::EvalStackOverflow)));
 }
@@ -303,7 +303,7 @@ fn eval_stack_overflow_is_an_error() {
 fn transcendental_eval_requires_std_feature_here_it_has_it() {
     // Built with `std` in this test harness, so sin works:
     let mut buf = [0u8; 64];
-    let n = rpn2::parse_into("sin(0)", &mut buf).unwrap();
+    let n = exprc::parse_into("sin(0)", &mut buf).unwrap();
     let v = eval(&buf[..n], &Vars::new(), &mut [0.0; 8]).unwrap();
     assert_eq!(v, 0.0);
 }

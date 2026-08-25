@@ -1,4 +1,4 @@
-//! Differential testing: rpn2 must be *indistinguishable* from pratt-rpn.
+//! Differential testing: exprc must be *indistinguishable* from pratt-rpn.
 //!
 //! Three campaigns, all deterministic (xorshift-seeded):
 //! 1. **Generated ASTs** — random expression trees rendered to source,
@@ -9,7 +9,7 @@
 //!    both engines must agree on Ok(bytes) or the exact Err.
 
 use pratt_rpn as v1;
-use rpn2::{Error as E2, MAX_RPN};
+use exprc::{Error as E2, MAX_RPN};
 use std::string::String;
 use std::vec::Vec;
 
@@ -38,7 +38,7 @@ fn run_v1(src: &str) -> Result<Vec<u8>, String> {
 
 fn run_v2(src: &str) -> Result<Vec<u8>, String> {
     let mut buf = [0u8; MAX_RPN];
-    match rpn2::parse_into(src, &mut buf) {
+    match exprc::parse_into(src, &mut buf) {
         Ok(n) => Ok(buf[..n].to_vec()),
         Err(e) => Err(format!("{e:?}")),
     }

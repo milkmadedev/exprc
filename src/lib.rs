@@ -1,11 +1,11 @@
-//! # rpn2
+//! # exprc
 //!
 //! Compiles mathematical expressions into compact binary RPN bytecode.
 //! `no_std`, zero allocation, no panics; all memory is caller-provided
 //! and every limit is programmer-configured.
 //!
 //! ```
-//! use rpn2::{decode_into, parse_into, MAX_RPN};
+//! use exprc::{decode_into, parse_into, MAX_RPN};
 //!
 //! let mut buf = [0u8; MAX_RPN];
 //! let n = parse_into("3x+2", &mut buf).unwrap();

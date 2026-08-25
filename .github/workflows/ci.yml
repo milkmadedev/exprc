@@ -15,7 +15,7 @@ jobs:
       # reference ../pratt-rpn.
       - uses: actions/checkout@v4
         with:
-          path: rpn2
+          path: exprc
       - uses: actions/checkout@v4
         with:
           repository: milkmadedev/pratt-rpn
@@ -24,13 +24,13 @@ jobs:
         with:
           targets: thumbv6m-none-eabi
           components: clippy, rustfmt
-      - working-directory: rpn2
+      - working-directory: exprc
         run: cargo fmt --check
-      - working-directory: rpn2
+      - working-directory: exprc
         run: cargo clippy --all-targets -- -D warnings
-      - working-directory: rpn2
+      - working-directory: exprc
         run: cargo test
-      - working-directory: rpn2
+      - working-directory: exprc
         run: cargo test --features std
-      - working-directory: rpn2
+      - working-directory: exprc
         run: cargo build --target thumbv6m-none-eabi --release

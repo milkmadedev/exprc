@@ -1,4 +1,4 @@
-//! Side-by-side benchmark: pratt-rpn (v1) vs rpn2 (v2).
+//! Side-by-side benchmark: pratt-rpn (v1) vs exprc (v2).
 //!
 //! Run with: cargo run --release --features std --example bench
 
@@ -40,7 +40,7 @@ fn main() {
             let _ = pratt_rpn::parse_into(expr, &mut b1);
         });
         let t2 = time(|| {
-            let _ = rpn2::parse_into(expr, &mut b2);
+            let _ = exprc::parse_into(expr, &mut b2);
         });
         println!("{name:<22} {t1:>10.1} {t2:>10.1} {:>7.2}x", t1 / t2);
     }

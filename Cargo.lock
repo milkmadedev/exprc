@@ -3,12 +3,12 @@
 version = 3
 
 [[package]]
-name = "pratt-rpn"
-version = "0.1.0"
-
-[[package]]
-name = "rpn2"
+name = "exprc"
 version = "0.1.0"
 dependencies = [
  "pratt-rpn",
 ]
+
+[[package]]
+name = "pratt-rpn"
+version = "0.1.0"

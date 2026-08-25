@@ -1,4 +1,4 @@
-use rpn2::{decode_into, parse_into, MAX_RPN};
+use exprc::{decode_into, parse_into, MAX_RPN};
 use std::process::ExitCode;
 
 const USAGE: &str = "usage: rpn <expression>\nexample: rpn \"3x+2\"";

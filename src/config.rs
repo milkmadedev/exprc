@@ -5,7 +5,7 @@
 //! spend, and every bound derives from those two numbers.
 //!
 //! ```
-//! use rpn2::Config;
+//! use exprc::Config;
 //!
 //! // Default posture (10 KiB output, depth 128):
 //! let cfg = Config::new();

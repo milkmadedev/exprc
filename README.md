@@ -1,4 +1,4 @@
-# rpn2
+# exprc
 
 A `no_std` library that compiles mathematical expressions into compact
 binary [RPN](https://en.wikipedia.org/wiki/Reverse_Polish_notation)
@@ -13,7 +13,7 @@ rpn   : 3 x * 2 +          (22 bytes of binary opcodes in your buffer)
 
 ```toml
 [dependencies]
-rpn2 = "0.1"
+exprc = "0.1"
 ```
 
 Enable the optional `std` feature for the CLI binary and transcendental
@@ -21,7 +21,7 @@ evaluation (`sin`, `cos`, `ln`, ...):
 
 ```toml
 [dependencies]
-rpn2 = { version = "0.1", features = ["std"] }
+exprc = { version = "0.1", features = ["std"] }
 ```
 
 The library core is `no_std` and never allocates on any compile or
@@ -32,7 +32,7 @@ evaluate path; all memory is caller-provided.
 ### Compile
 
 ```rust
-use rpn2::{decode_into, parse_into, MAX_RPN};
+use exprc::{decode_into, parse_into, MAX_RPN};
 
 let mut buf = [0u8; MAX_RPN];
 let n = parse_into("atan(2)x + log(8)_2", &mut buf)?;
@@ -41,7 +41,7 @@ let n = parse_into("atan(2)x + log(8)_2", &mut buf)?;
 let mut text = [0u8; 4 * MAX_RPN];
 let m = decode_into(&buf[..n], &mut text)?;
 assert_eq!(&text[..m], b"2 atan x * 8 log 2 logb +");
-# Ok::<(), rpn2::Error>(())
+# Ok::<(), exprc::Error>(())
 ```
 
 ### Choose your own limits
@@ -50,14 +50,14 @@ Nothing about output size or nesting is hard-coded. A `Config` states
 the budget and depth; scratch requirements derive from it.
 
 ```rust
-use rpn2::{compile_into, Config, NoResolve};
+use exprc::{compile_into, Config, NoResolve};
 
 let cfg = Config::new().output_limit(1024 * 1024).max_depth(2048);
 
 let mut out = vec![0u8; cfg.get_output_limit()];
 let mut stack = vec![0u8; cfg.scratch_len()];
 let n = compile_into(&cfg, &NoResolve, "1+1", &mut out, &mut stack)?;
-# Ok::<(), rpn2::Error>(())
+# Ok::<(), exprc::Error>(())
 ```
 
 Exceeding the configured limit returns `Error::OutputLimitExceeded`;
@@ -76,7 +76,7 @@ every downstream result on the next compile.
 When every part of a chain is numeric, it folds to a literal:
 
 ```rust
-use rpn2::{decode_into, Config, Session};
+use exprc::{decode_into, Config, Session};
 
 let mut s = Session::<256>::new(Config::new());
 let mut stack = [0u8; Config::new().scratch_len()];
@@ -91,7 +91,7 @@ let n = s.compile("x+1", &mut out, &mut stack)?;
 let mut text = [0u8; 512];
 let m = decode_into(&out[..n], &mut text)?;
 assert_eq!(&text[..m], b"42 1 +");
-# Ok::<(), rpn2::Error>(())
+# Ok::<(), exprc::Error>(())
 ```
 
 Recursive definitions are rejected with `Error::RecursiveDefinition`
@@ -102,7 +102,7 @@ calculator-style input and distinguishes assignments from expressions.
 ### Evaluate
 
 ```rust
-use rpn2::{eval, parse_into, Vars};
+use exprc::{eval, parse_into, Vars};
 
 let mut buf = [0u8; 256];
 let n = parse_into("2x^2+1", &mut buf)?;
@@ -110,7 +110,7 @@ let n = parse_into("2x^2+1", &mut buf)?;
 let mut vars = Vars::zeroed();
 vars.set(b'x', 3.0);
 assert_eq!(eval(&buf[..n], &vars, &mut [0.0; 64])?, 19.0);
-# Ok::<(), rpn2::Error>(())
+# Ok::<(), exprc::Error>(())
 ```
 
 A postfix stack machine over caller-provided memory. Unset variables
@@ -121,7 +121,7 @@ it.
 ### Solve equations numerically
 
 ```rust
-use rpn2::{parse_into, solve, SolveCfg, Vars};
+use exprc::{parse_into, solve, SolveCfg, Vars};
 
 // y = 2x+3 meets y = 2x^3+10 — where?
 let mut l = [0u8; 128];
@@ -176,7 +176,7 @@ instruction can be skipped or decoded in O(1):
 | `0x10`–`0x14` | — | 1 | `+ - * / ^` |
 | `0x15` | — | 1 | unary negate |
 
-Constants live in [`rpn2::opcodes`](src/opcodes.rs).
+Constants live in [`exprc::opcodes`](src/opcodes.rs).
 
 ## Errors
 

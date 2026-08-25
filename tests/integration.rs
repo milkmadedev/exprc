@@ -1,4 +1,4 @@
-use rpn2::{decode_into, parse_into, Error, MAX_RPN};
+use exprc::{decode_into, parse_into, Error, MAX_RPN};
 
 fn rpn(src: &str) -> Result<String, Error> {
     let mut buf = [0u8; MAX_RPN];

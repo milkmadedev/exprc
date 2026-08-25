@@ -1,5 +1,5 @@
 [package]
-name = "rpn2"
+name = "exprc"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.81"
@@ -7,11 +7,11 @@ license = "MIT"
 description = "Compiles math expressions (&str) into compact binary RPN bytecode. Zero-alloc, no_std, iterative, SIMD-assisted; built for live per-keystroke recompilation."
 keywords = ["parser", "rpn", "bytecode", "expression", "no-std"]
 readme = "README.md"
-repository = "https://github.com/milkmadedev/rpn2"
+repository = "https://github.com/milkmadedev/exprc"
 categories = ["no-std", "parsing"]
 
 [lib]
-name = "rpn2"
+name = "exprc"
 path = "src/lib.rs"
 
 # The library is no_std; only the CLI binary needs std. Gate it so embedded
@@ -20,8 +20,8 @@ path = "src/lib.rs"
 std = []
 
 [[bin]]
-name = "rpn2"
-path = "src/bin/rpn2.rs"
+name = "exprc"
+path = "src/bin/exprc.rs"
 required-features = ["std"]
 
 [dev-dependencies]

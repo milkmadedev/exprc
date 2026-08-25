@@ -7,7 +7,7 @@
 //! single literal — the "solve" behavior:
 //!
 //! ```
-//! use rpn2::{decode_into, Config, Session};
+//! use exprc::{decode_into, Config, Session};
 //!
 //! let mut s = Session::<256>::new(Config::new());
 //! let mut stack = [0u8; Config::new().scratch_len()];

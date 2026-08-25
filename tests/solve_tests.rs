@@ -1,6 +1,6 @@
 //! Numeric equation solving.
 
-use rpn2::{eval, parse_into, solve, Session, SolveCfg, Vars};
+use exprc::{eval, parse_into, solve, Session, SolveCfg, Vars};
 
 fn roots_of(lhs: &str, rhs: &str) -> Vec<f64> {
     let mut l = [0u8; 512];
@@ -91,8 +91,8 @@ fn tangential_root_is_invisible_like_a_calculator() {
 
 #[test]
 fn session_definitions_participate() {
-    let mut s = Session::<256>::new(rpn2::Config::new());
-    let mut stack = vec![0u8; rpn2::Config::new().scratch_len()];
+    let mut s = Session::<256>::new(exprc::Config::new());
+    let mut stack = vec![0u8; exprc::Config::new().scratch_len()];
     s.compile_line("m = 2x+3", &mut [], &mut stack).unwrap();
     s.compile_line("k = 2x^3+10", &mut [], &mut stack).unwrap();
 
